@@ -1,50 +1,62 @@
-# Welcome to your Expo app 👋
+# Manipulation Shield 🛡️
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+> Paste any suspicious message. Understand exactly what psychological trick is being used against you.
 
-## Get started
+Scams via WhatsApp, SMS, and email are surging across India and Southeast Asia. Most victims aren't naive — they simply don't recognize the technique being used against them. Manipulation Shield names the tactic, explains the psychology behind it, and tells you what to do next.
 
-1. Install dependencies
+**The message never gets stored. No account required.**
 
-   ```bash
-   npm install
-   ```
+---
 
-2. Start the app
+## Demo
 
-   ```bash
-   npx expo start
-   ```
+Paste a message like:
+> "Your SBI account has been SUSPENDED. Verify your KYC immediately or lose access forever."
 
-In the output, you'll find options to open the app in a
+Get back:
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+- **Tactic:** False Urgency + Fear Amplification
+- **What it's doing:** Creating a fake deadline to bypass rational thinking
+- **Why it works:** Urgency triggers the brain's threat response, skipping deliberate reasoning
+- **Flagged phrases:** "SUSPENDED", "immediately", "lose access forever"
+- **What to do:** Do not click. Call your bank directly.
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+---
 
-## Get a fresh project
+## Features
 
-When you're ready, run:
+- Paste any message up to 2,000 characters
+- AI-powered tactic classification via Gemini 2.0 Flash
+- Flagged phrases highlighted with explanations
+- Risk level: Low / Suspicious / High
+- Recommended action for every result
+- Tactic Library: 12 common manipulation patterns explained
+- Privacy-first: nothing stored, no account needed
 
-```bash
-npm run reset-project
-```
+---
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## Why I Built This
 
-## Learn more
+I study how AI models get manipulated through adversarial prompting and red-teaming. This app is the consumer-facing inversion of that work. The same techniques used to manipulate language models — false authority, urgency injection, reward framing — are used to manipulate people every day over WhatsApp.
 
-To learn more about developing your project with Expo, look at the following resources:
+Most people receive these messages and have no framework to recognize what's happening. This app gives them that framework in seconds.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+---
 
-## Join the community
+## Tech Stack
 
-Join our community of developers creating universal apps.
+- React Native (Expo SDK 54)
+- Google Gemini 2.0 Flash API
+- Expo Router
+- TypeScript
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+---
+
+## Project Docs
+
+Full specification documents in `/docs`:
+
+- [PRD](docs/PRD.md) — Product requirements and feature scope
+- [Technical Architecture](docs/TECHNICAL-ARCHITECTURE.md) — System design and data flow
+- [Security and Access](docs/SECURITY-AND-ACCESS.md) — Data handling and privacy model
+- [Frontend Spec]
