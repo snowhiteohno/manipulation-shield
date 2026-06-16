@@ -1,241 +1,172 @@
+import * as Haptics from 'expo-haptics';
+import { router } from 'expo-router';
 import { useState } from 'react';
 import {
-  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
-  TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { AnalyzeButton } from '@/components/AnalyzeButton';
+import { AnalyzeInput } from '@/components/AnalyzeInput';
+import { ResultView } from '@/components/ResultView';
+import { EmptyState } from '@/components/states/EmptyState';
+import { ErrorState } from '@/components/states/ErrorState';
+import { LoadingState } from '@/components/states/LoadingState';
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { FontSizes, Spacing } from '@/constants/theme';
+import { usePalette } from '@/hooks/use-palette';
+import { analyzeMessage } from '@/lib/gemini';
+import { MAX_MESSAGE_CHARS } from '@/lib/prompt';
+import { RISK_META } from '@/lib/risk';
+import { AnalysisError, type AnalysisErrorCode, type AnalysisResult } from '@/lib/types';
+
+type Status =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'result'; result: AnalysisResult; message: string }
+  | { kind: 'error'; code: AnalysisErrorCode };
 
 export default function AnalyzeScreen() {
+  const c = usePalette();
+  const insets = useSafeAreaInsets();
   const [message, setMessage] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<null | {
-    tactic_name: string;
-    risk_level: string;
-    explanation: string;
-    psychology: string;
-    flagged_phrases: { phrase: string; reason: string }[];
-    recommended_action: string;
-  }>(null);
-  const [error, setError] = useState('');
+  const [status, setStatus] = useState<Status>({ kind: 'idle' });
 
-  const riskColor = {
-    low: '#3DDC84',
-    suspicious: '#F5A623',
-    high: '#E5534B',
-  };
+  const trimmedLen = message.trim().length;
+  const overLimit = message.length > MAX_MESSAGE_CHARS;
+  const canAnalyze = trimmedLen > 0 && !overLimit;
 
-  async function analyze() {
-    if (message.trim().length < 10) return;
-    setLoading(true);
-    setError('');
-    setResult(null);
-
-    const apiKey = process.env.EXPO_PUBLIC_GEMINI_KEY;
-    if (!apiKey) {
-      setError('Missing API key. Set EXPO_PUBLIC_GEMINI_KEY and restart the app.');
-      setLoading(false);
-      return;
-    }
-
+  async function runAnalysis() {
+    const snapshot = message;
+    setStatus({ kind: 'loading' });
     try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            system_instruction: {
-              parts: [{
-                text: `You are a manipulation tactic classifier. Analyze the message and return ONLY valid JSON with this exact structure:
-{
-  "tactic_name": string,
-  "risk_level": "low" or "suspicious" or "high",
-  "explanation": string (2-3 sentences plain language),
-  "psychology": string (1 sentence why it works on humans),
-  "flagged_phrases": [{"phrase": string, "reason": string}],
-  "recommended_action": "Safe to ignore" or "Verify through official channel" or "Do not respond or click"
-}
-Never add text outside the JSON.`
-              }]
-            },
-            contents: [{ parts: [{ text: message }] }],
-            generationConfig: {
-              temperature: 0.1,
-              maxOutputTokens: 1024,
-              responseMimeType: 'application/json',
-            },
-          }),
-        }
-      );
-
-      const data = await response.json();
-      console.log('API response:', JSON.stringify(data));
-
-      if (!response.ok) {
-        throw new Error(data?.error?.message ?? `Request failed (${response.status})`);
-      }
-      if (data.promptFeedback?.blockReason) {
-        setError('This message was blocked by the safety filter and could not be analyzed.');
-        return;
-      }
-
-      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!raw) {
-        setError('No analysis was returned. Try rephrasing the message.');
-        return;
-      }
-
-      const parsed = JSON.parse(raw);
-      setResult(parsed);
+      const result = await analyzeMessage(snapshot);
+      setStatus({ kind: 'result', result, message: snapshot });
+      hapticFor(result);
     } catch (e) {
-      console.log('Error:', e);
-      setError('Analysis failed. Check your connection and try again.');
-    } finally {
-      setLoading(false);
+      const code = e instanceof AnalysisError ? e.code : 'service';
+      setStatus({ kind: 'error', code });
     }
   }
 
-  const color = result ? riskColor[result.risk_level as keyof typeof riskColor] ?? '#8B91B0' : '#8B91B0';
+  function hapticFor(result: AnalysisResult) {
+    if (Platform.OS === 'web') return;
+    const style =
+      result.riskLevel === 'high'
+        ? Haptics.NotificationFeedbackType.Error
+        : result.riskLevel === 'suspicious'
+          ? Haptics.NotificationFeedbackType.Warning
+          : Haptics.NotificationFeedbackType.Success;
+    Haptics.notificationAsync(style).catch(() => {});
+  }
+
+  function analyzeAnother() {
+    setStatus({ kind: 'idle' });
+    setMessage('');
+  }
+
+  async function share() {
+    if (status.kind !== 'result') return;
+    const { result } = status;
+    const tactics = result.tactics.map((t) => `• ${t.name}`).join('\n');
+    const text = [
+      `Manipulation Shield — risk: ${RISK_META[result.riskLevel].label}`,
+      result.summary,
+      tactics && `\nTactics:\n${tactics}`,
+      `\nWhat to do: ${result.recommendedAction}`,
+      '\n(AI explanation, can be wrong — verify through official channels.)',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    try {
+      await Share.share({ message: text });
+    } catch {
+      // user cancelled or platform unsupported; nothing to do
+    }
+  }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>Manipulation Shield</Text>
-      <Text style={styles.subtitle}>Paste any suspicious message below</Text>
-
-      <TextInput
-        style={styles.input}
-        multiline
-        placeholder="Paste a WhatsApp, SMS, or email message..."
-        placeholderTextColor="#4A4F6A"
-        value={message}
-        onChangeText={setMessage}
-        maxLength={2000}
-      />
-      <Text style={styles.charCount}>{message.length} / 2000</Text>
-
-      <TouchableOpacity
-        style={[styles.button, (message.trim().length < 10 || loading) && styles.buttonDisabled]}
-        onPress={analyze}
-        disabled={message.trim().length < 10 || loading}
-      >
-        {loading
-          ? <ActivityIndicator color="#fff" />
-          : <Text style={styles.buttonText}>Analyze Message</Text>
-        }
-      </TouchableOpacity>
-
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-
-      {result && (
-        <View style={styles.resultCard}>
-          <View style={[styles.riskBadge, { borderColor: color, backgroundColor: color + '26' }]}>
-            <Text style={[styles.riskText, { color }]}>{result.risk_level.toUpperCase()}</Text>
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: c.background }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: insets.top + Spacing.md, paddingBottom: insets.bottom + Spacing.xxl },
+        ]}
+        keyboardShouldPersistTaps="handled">
+        <View style={styles.column}>
+          <View style={styles.header}>
+            <View style={styles.titleRow}>
+              <IconSymbol name="shield.lefthalf.filled" size={26} color={c.accent} />
+              <Text style={[styles.title, { color: c.text }]}>Manipulation Shield</Text>
+            </View>
+            <Pressable
+              onPress={() => router.push('/modal')}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="About and privacy">
+              <IconSymbol name="info.circle" size={24} color={c.textMuted} />
+            </Pressable>
           </View>
 
-          <Text style={styles.tacticName}>{result.tactic_name}</Text>
+          <AnalyzeInput value={message} onChange={setMessage} max={MAX_MESSAGE_CHARS} />
 
-          <Text style={styles.sectionLabel}>WHAT'S HAPPENING</Text>
-          <Text style={styles.bodyText}>{result.explanation}</Text>
-
-          <Text style={styles.sectionLabel}>WHY IT WORKS</Text>
-          <Text style={styles.bodyText}>{result.psychology}</Text>
-
-          {result.flagged_phrases.length > 0 && (
-            <>
-              <Text style={styles.sectionLabel}>FLAGGED PHRASES</Text>
-              {result.flagged_phrases.map((p, i) => (
-                <View key={i} style={styles.phraseCard}>
-                  <Text style={styles.phrase}>"{p.phrase}"</Text>
-                  <Text style={styles.phraseReason}>{p.reason}</Text>
-                </View>
-              ))}
-            </>
+          {overLimit && (
+            <Text style={[styles.warn, { color: c.riskHigh }]}>
+              That&apos;s a bit long. Trim it to {MAX_MESSAGE_CHARS.toLocaleString()} characters.
+            </Text>
           )}
 
-          <Text style={styles.sectionLabel}>WHAT TO DO</Text>
-          <View style={[styles.actionBanner, { borderLeftColor: color }]}>
-            <Text style={styles.actionText}>{result.recommended_action}</Text>
-          </View>
+          <AnalyzeButton
+            onPress={runAnalysis}
+            disabled={!canAnalyze}
+            loading={status.kind === 'loading'}
+          />
 
-          <Text style={styles.privacy}>🔒 Text sent to Google Gemini for analysis. Not stored by this app.</Text>
+          {status.kind === 'idle' && <EmptyState />}
+          {status.kind === 'loading' && <LoadingState />}
+          {status.kind === 'error' && (
+            <View style={styles.resultArea}>
+              <ErrorState code={status.code} onRetry={runAnalysis} />
+            </View>
+          )}
+          {status.kind === 'result' && (
+            <ResultView
+              result={status.result}
+              message={status.message}
+              onAnalyzeAnother={analyzeAnother}
+              onShare={Platform.OS === 'web' ? undefined : share}
+              onTacticPress={(tacticId) =>
+                router.push({ pathname: '/(tabs)/explore', params: { tacticId } })
+              }
+            />
+          )}
         </View>
-      )}
-    </ScrollView>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0F1117' },
-  content: { padding: 20, paddingTop: 60 },
-  title: { color: '#F0F2FF', fontSize: 24, fontWeight: 'bold', marginBottom: 4 },
-  subtitle: { color: '#8B91B0', fontSize: 14, marginBottom: 20 },
-  input: {
-    backgroundColor: '#1C1F2E',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#2A2D3E',
-    color: '#F0F2FF',
-    fontSize: 15,
-    padding: 14,
-    minHeight: 140,
-    textAlignVertical: 'top',
-  },
-  charCount: { color: '#4A4F6A', fontSize: 12, textAlign: 'right', marginTop: 4 },
-  button: {
-    backgroundColor: '#5B6EF5',
-    borderRadius: 12,
-    height: 52,
-    justifyContent: 'center',
+  content: { paddingHorizontal: Spacing.lg },
+  column: { width: '100%', maxWidth: 560, alignSelf: 'center', gap: Spacing.lg },
+  header: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 16,
+    justifyContent: 'space-between',
   },
-  buttonDisabled: { opacity: 0.4 },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  error: { color: '#E5534B', marginTop: 12, textAlign: 'center' },
-  resultCard: {
-    backgroundColor: '#1C1F2E',
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 24,
-  },
-  riskBadge: {
-    alignSelf: 'flex-start',
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    marginBottom: 12,
-  },
-  riskText: { fontSize: 13, fontWeight: 'bold' },
-  tacticName: { color: '#F0F2FF', fontSize: 22, fontWeight: 'bold', marginBottom: 16 },
-  sectionLabel: {
-    color: '#4A4F6A',
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 1,
-    marginTop: 16,
-    marginBottom: 6,
-  },
-  bodyText: { color: '#8B91B0', fontSize: 14, lineHeight: 22 },
-  phraseCard: {
-    backgroundColor: '#0F1117',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
-  },
-  phrase: { color: '#F5A623', fontSize: 14, fontWeight: '600', marginBottom: 4 },
-  phraseReason: { color: '#8B91B0', fontSize: 13 },
-  actionBanner: {
-    borderLeftWidth: 4,
-    backgroundColor: '#0F1117',
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 6,
-  },
-  actionText: { color: '#F0F2FF', fontSize: 15, fontWeight: '500' },
-  privacy: { color: '#4A4F6A', fontSize: 12, marginTop: 16, textAlign: 'center' },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, flexShrink: 1 },
+  title: { fontSize: FontSizes.display, fontWeight: '700', flexShrink: 1 },
+  warn: { fontSize: FontSizes.label, fontWeight: '500' },
+  resultArea: { marginTop: Spacing.md },
 });
