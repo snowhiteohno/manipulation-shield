@@ -24,7 +24,8 @@ function isString(v: unknown): v is string {
 
 // Validate the parsed object against AnalysisResult. Throws on mismatch so a
 // malformed response is treated as an error, never trusted (SECURITY §4).
-function validate(data: unknown): AnalysisResult {
+// Exported for unit testing (ARCHITECTURE §9).
+export function validateAnalysis(data: unknown): AnalysisResult {
   if (!data || typeof data !== 'object') throw new AnalysisError('parse');
   const d = data as Record<string, unknown>;
 
@@ -108,9 +109,10 @@ async function postToGemini(message: string): Promise<string> {
   return text;
 }
 
-function parseResult(raw: string): AnalysisResult {
+// Parse a raw JSON string from the model and validate it. Exported for tests.
+export function parseResult(raw: string): AnalysisResult {
   // responseMimeType is JSON, so a direct parse should work; guard anyway.
-  return validate(JSON.parse(raw));
+  return validateAnalysis(JSON.parse(raw));
 }
 
 /** Analyze a message and return a typed result. Never logs message content. */
